@@ -23,6 +23,7 @@ import (
 
 	"github.com/netbirdio/netbird/client/iface/wgaddr"
 
+	"github.com/netbirdio/netbird/client/firewall/uspfilter/forwarder"
 	"github.com/netbirdio/netbird/client/iface"
 	"github.com/netbirdio/netbird/client/iface/device"
 	"github.com/netbirdio/netbird/client/iface/netstack"
@@ -72,6 +73,7 @@ type ConnectClient struct {
 	updateManager *updater.Manager
 
 	persistSyncResponse bool
+	routedDialer        forwarder.RoutedDialFunc
 	// inMemoryState keeps the state manager off disk, for clients that change
 	// nothing on the host that a later run would have to restore.
 	inMemoryState bool
@@ -108,6 +110,12 @@ func WithProfileOwner(username string) ConnectClientOption {
 // determined, so no user's certificate store answers certificate posture checks.
 func WithUnknownProfileOwner() ConnectClientOption {
 	return func(c *ConnectClient) { c.profileOwnerUnknown = true }
+}
+
+// WithRoutedDialer sets the dialer that opens the outbound connections of
+// routed flows. It needs userspace routing (netstack mode).
+func WithRoutedDialer(dial forwarder.RoutedDialFunc) ConnectClientOption {
+	return func(c *ConnectClient) { c.routedDialer = dial }
 }
 
 func NewConnectClient(
@@ -452,6 +460,7 @@ func (c *ConnectClient) run(mobileDependency MobileDependency, runningChan chan 
 			log.Error(err)
 			return wrapErr(err)
 		}
+		engineConfig.RoutedDialer = c.routedDialer
 		engineConfig.TempDir = mobileDependency.TempDir
 		engineConfig.CertStore.ProfileOwner = c.profileOwner
 		engineConfig.CertStore.OwnerUnknown = c.profileOwnerUnknown

@@ -165,6 +165,10 @@ type EngineConfig struct {
 	DisableIPv6         bool
 	SyncMessageVersion  *int
 
+	// RoutedDialer opens the outbound connections of routed flows in userspace
+	// routing. Only the userspace firewall supports it.
+	RoutedDialer forwarder.RoutedDialFunc
+
 	// LazyConnection is the MDM-sourced lazy-connection override; StateUnset defers to
 	// the env var and management feature flag.
 	LazyConnection lazyconn.State
@@ -773,6 +777,16 @@ func (e *Engine) createFirewall() error {
 	}
 	if e.firewall == nil {
 		return fmt.Errorf("create firewall manager: received nil manager")
+	}
+
+	if e.config.RoutedDialer != nil {
+		setter, ok := e.firewall.(interface {
+			SetRoutedDialer(forwarder.RoutedDialFunc)
+		})
+		if !ok {
+			return fmt.Errorf("create firewall manager: routed dialer needs the userspace firewall")
+		}
+		setter.SetRoutedDialer(e.config.RoutedDialer)
 	}
 
 	if err := e.initFirewall(); err != nil {

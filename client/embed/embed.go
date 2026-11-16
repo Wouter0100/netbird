@@ -15,6 +15,7 @@ import (
 	wgdevice "golang.zx2c4.com/wireguard/device"
 	wgnetstack "golang.zx2c4.com/wireguard/tun/netstack"
 
+	"github.com/netbirdio/netbird/client/firewall/uspfilter/forwarder"
 	"github.com/netbirdio/netbird/client/iface"
 	"github.com/netbirdio/netbird/client/iface/netstack"
 	"github.com/netbirdio/netbird/client/internal"
@@ -57,6 +58,7 @@ type Client struct {
 	// inMemoryState is set when no StatePath was given in netstack mode,
 	// where the client changes nothing on the host that needs restoring.
 	inMemoryState bool
+	routedDialer  forwarder.RoutedDialFunc
 }
 
 // Options configures a new Client.
@@ -101,6 +103,15 @@ type Options struct {
 	// when the embedded client must never act as a stepping stone into
 	// the host's local network (e.g. the proxy's overlay peer).
 	BlockLANAccess bool
+	// EnableServerRoutes lets this peer act as a routing peer for the
+	// networks that management assigns to it. Routed flows are forwarded in
+	// userspace, so it needs userspace networking.
+	EnableServerRoutes bool
+	// RoutedDialer, when set, opens the outbound connection of each routed
+	// flow instead of a host socket to the original destination. src is the
+	// peer that opened the flow and dst is the address and port it dialled.
+	// Returning an error refuses the flow. Needs EnableServerRoutes.
+	RoutedDialer func(ctx context.Context, network string, src, dst netip.AddrPort) (net.Conn, error)
 	// LazyConnectionEnabled is a tri-state local override for lazy connections,
 	// mirroring the NB_LAZY_CONN env var. Nil defers to the management feature
 	// flag; a set value overrides it in both directions. A short-lived client
@@ -208,13 +219,17 @@ func New(opts Options) (*Client, error) {
 		return nil, fmt.Errorf("invalid dns labels: %w", err)
 	}
 
-	t := true
+	if opts.RoutedDialer != nil && (!opts.EnableServerRoutes || opts.NoUserspace) {
+		return nil, errors.New("RoutedDialer needs EnableServerRoutes and userspace networking")
+	}
+
+	disableServerRoutes := !opts.EnableServerRoutes
 	var config *profilemanager.Config
 	input := profilemanager.ConfigInput{
 		ConfigPath:          opts.ConfigPath,
 		ManagementURL:       opts.ManagementURL,
 		PreSharedKey:        &opts.PreSharedKey,
-		DisableServerRoutes: &t,
+		DisableServerRoutes: &disableServerRoutes,
 		DisableClientRoutes: &opts.DisableClientRoutes,
 		DisableIPv6:         &opts.DisableIPv6,
 		BlockInbound:        &opts.BlockInbound,
@@ -267,6 +282,7 @@ func New(opts Options) (*Client, error) {
 		// Without a path the default would be the installed agent's state
 		// file, which this client must neither read nor overwrite.
 		inMemoryState: opts.StatePath == "" && !opts.NoUserspace,
+		routedDialer:  opts.RoutedDialer,
 	}, nil
 }
 
@@ -301,6 +317,9 @@ func (c *Client) Start(startCtx context.Context) error {
 	var connectOpts []internal.ConnectClientOption
 	if c.inMemoryState {
 		connectOpts = append(connectOpts, internal.WithInMemoryState())
+	}
+	if c.routedDialer != nil {
+		connectOpts = append(connectOpts, internal.WithRoutedDialer(c.routedDialer))
 	}
 	client := internal.NewConnectClient(ctx, c.config, c.recorder, connectOpts...)
 	client.SetSyncResponsePersistence(true)

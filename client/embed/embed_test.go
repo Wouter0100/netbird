@@ -3,6 +3,7 @@ package embed
 import (
 	"context"
 	"net"
+	"net/netip"
 	"testing"
 	"time"
 
@@ -164,4 +165,16 @@ func startManagement(t *testing.T, signalAddr string) string {
 	t.Cleanup(s.Stop)
 
 	return lis.Addr().String()
+}
+
+func TestNewRejectsRoutedDialerWithoutServerRoutes(t *testing.T) {
+	dial := func(context.Context, string, netip.AddrPort, netip.AddrPort) (net.Conn, error) {
+		return nil, nil
+	}
+
+	_, err := New(Options{DeviceName: "embed-routed-dialer-test", RoutedDialer: dial})
+	require.Error(t, err)
+
+	_, err = New(Options{DeviceName: "embed-routed-dialer-test", RoutedDialer: dial, EnableServerRoutes: true, NoUserspace: true})
+	require.Error(t, err)
 }

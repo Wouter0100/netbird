@@ -2,7 +2,6 @@ package forwarder
 
 import (
 	"net"
-	"strconv"
 
 	"github.com/google/uuid"
 
@@ -31,9 +30,7 @@ func (f *Forwarder) handleTCP(r *tcp.ForwarderRequest) {
 		}
 	}()
 
-	dialAddr := net.JoinHostPort(f.determineDialAddr(id.LocalAddress).String(), strconv.Itoa(int(id.LocalPort)))
-
-	outConn, err := (&net.Dialer{}).DialContext(f.ctx, "tcp", dialAddr)
+	outConn, err := f.dialRouted("tcp", id)
 	if err != nil {
 		r.Complete(true)
 		if f.logger.Enabled(nblog.LevelTrace) {

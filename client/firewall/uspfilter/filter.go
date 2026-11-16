@@ -188,6 +188,7 @@ type Manager struct {
 	fragments      *fragmentTracker
 	forwarder      atomic.Pointer[forwarder.Forwarder]
 	pendingCapture atomic.Pointer[forwarder.PacketCapture]
+	pendingDialer  atomic.Pointer[forwarder.RoutedDialFunc]
 	logger         *nblog.Logger
 	flowLogger     nftypes.FlowLogger
 
@@ -546,6 +547,20 @@ func (m *Manager) determineRouting() error {
 	return nil
 }
 
+// SetRoutedDialer sets the dialer that opens the outbound connections of routed
+// flows in userspace routing. A nil dialer restores host sockets to the
+// original destination.
+func (m *Manager) SetRoutedDialer(dial forwarder.RoutedDialFunc) {
+	if dial == nil {
+		m.pendingDialer.Store(nil)
+	} else {
+		m.pendingDialer.Store(&dial)
+	}
+	if fwder := m.forwarder.Load(); fwder != nil {
+		fwder.SetDialer(dial)
+	}
+}
+
 // SetPacketCapture sets or clears packet capture on the forwarder endpoint.
 // This captures outbound response packets that bypass the FilteredDevice in netstack mode.
 func (m *Manager) SetPacketCapture(pc forwarder.PacketCapture) {
@@ -583,6 +598,9 @@ func (m *Manager) initForwarder() error {
 	// Re-load after store: a concurrent SetPacketCapture may have seen forwarder as nil and only updated pendingCapture.
 	if pc := m.pendingCapture.Load(); pc != nil {
 		forwarder.SetCapture(*pc)
+	}
+	if dial := m.pendingDialer.Load(); dial != nil {
+		forwarder.SetDialer(*dial)
 	}
 
 	log.Debug("forwarder initialized")

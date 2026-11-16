@@ -9,6 +9,7 @@ import (
 	"runtime"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	log "github.com/sirupsen/logrus"
@@ -63,6 +64,7 @@ type Forwarder struct {
 	hasRawICMPAccess   bool
 	hasRawICMPv6Access bool
 	pingSemaphore      chan struct{}
+	dialer             atomic.Pointer[RoutedDialFunc]
 }
 
 func New(iface IFace, logger *nblog.Logger, flowLogger nftypes.FlowLogger, netstack bool, mtu uint16) (*Forwarder, error) {
